@@ -150,9 +150,11 @@ def main() -> None:
     required_policy_checks = (
         "https", "appassets.androidplatform.net", "rawUserInfo",
         "rawAuthority", "uri.port", "/assets/", "rawQuery",
-        "rawFragment", "TrustedNavigationPolicy.isTrustedDocumentUrl",
+        "rawFragment",
     )
-    if "shouldOverrideUrlLoading" not in activity_text or any(token not in policy_text for token in required_policy_checks):
+    if ("shouldOverrideUrlLoading" not in activity_text or
+        "TrustedNavigationPolicy.isTrustedDocumentUrl" not in activity_text or
+        any(token not in policy_text for token in required_policy_checks)):
         fail("Android WebView must enforce exact HTTPS origin, authority, port, and packaged asset path")
     if "legacy_api23" not in activity_text or "WEBVIEW_CSP_VIOLATION" not in activity_text:
         fail("Android WebView must fail closed on legacy navigation and report CSP violations")
