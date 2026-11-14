@@ -207,7 +207,9 @@ export default function App() {
       });
       const response = await fetch(`/api/v1/trips/search?${params.toString()}`, { signal: controller.signal });
       if (!response.ok) throw new Error("search");
-      setTrips((await response.json()) as TripResult[]);
+      const results = (await response.json()) as TripResult[];
+      if (controller.signal.aborted) return;
+      setTrips(results);
     } catch (reason) {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) { setTrips([]); setError("error"); }
     } finally {
@@ -225,7 +227,9 @@ export default function App() {
     try {
       const response = await fetch(`/api/v1/trips/${trip.id}/seats`, { signal: controller.signal });
       if (!response.ok) throw new Error("seats");
-      setSeats((await response.json()) as SeatOption[]);
+      const inventory = (await response.json()) as SeatOption[];
+      if (controller.signal.aborted) return;
+      setSeats(inventory);
     } catch (reason) {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) setError("error");
     } finally {
