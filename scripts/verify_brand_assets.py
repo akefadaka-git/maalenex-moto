@@ -143,8 +143,19 @@ def main() -> None:
         fail("Android WebView must disable file and content URL access")
     if "addJavascriptInterface" in activity_text:
         fail("Android WebView must not expose a JavaScript bridge")
-    if "shouldOverrideUrlLoading" not in activity_text or "APP_ASSET_HOST" not in activity_text:
-        fail("Android WebView must restrict top-level navigation to the local asset origin")
+    policy_path = ROOT / "android/app/src/main/java/com/maalenex/moto/TrustedNavigationPolicy.kt"
+    if not policy_path.is_file():
+        fail("Dedicated trusted navigation policy is missing")
+    policy_text = policy_path.read_text(encoding="utf-8")
+    required_policy_checks = (
+        "https", "appassets.androidplatform.net", "rawUserInfo",
+        "rawAuthority", "uri.port", "/assets/", "rawQuery",
+        "rawFragment", "TrustedNavigationPolicy.isTrustedDocumentUrl",
+    )
+    if "shouldOverrideUrlLoading" not in activity_text or any(token not in policy_text for token in required_policy_checks):
+        fail("Android WebView must enforce exact HTTPS origin, authority, port, and packaged asset path")
+    if "legacy_api23" not in activity_text or "WEBVIEW_CSP_VIOLATION" not in activity_text:
+        fail("Android WebView must fail closed on legacy navigation and report CSP violations")
     permissions = android_manifest.findall("uses-permission")
     if any(p.attrib.get(ANDROID + "name") == "android.permission.INTERNET" for p in permissions):
         fail("Offline packaged shell must not request INTERNET permission before a reviewed API integration")
