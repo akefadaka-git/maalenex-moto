@@ -124,7 +124,6 @@ import sys
 from pathlib import Path
 
 full_log = Path(sys.argv[1]).read_text(errors="replace")
-bounded_log = Path(sys.argv[2]).read_text(errors="replace")
 pid = sys.argv[3]
 probe_path = Path(sys.argv[4])
 summary = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"]) if __import__("os").environ.get("GITHUB_STEP_SUMMARY") else None
@@ -181,6 +180,11 @@ for forbidden, label in (
 ):
     if forbidden in full_log:
         fail(f"{label} detected during smoke window")
+for line in full_log.splitlines():
+    if pid in line and (
+        "has died" in line or "am_proc_died" in line or "Process died" in line
+    ):
+        fail("app process-death event detected during smoke window")
 
 # Persist and summarize the exact JSON text emitted by native code, without re-serialization.
 probe_path.write_text(raw_json + "\n", encoding="utf-8")
