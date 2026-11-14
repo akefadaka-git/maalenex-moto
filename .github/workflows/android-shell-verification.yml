@@ -115,7 +115,7 @@ jobs:
           )
           print(line)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"## Trusted navigation unit tests\\n\\n- {line}\\n")
+              summary.write(f"## Trusted navigation unit tests\n\n- {line}\n")
           PY
 
       - name: Upload trusted navigation unit-test reports
