@@ -90,8 +90,8 @@ jobs:
           print("IDENTITY_LOOKUP_KEY=" + secrets.token_urlsafe(48))
           PY
           while IFS= read -r entry; do
-            printf '::add-mask::%s\\n' "${entry#*=}"
-            printf '%s\\n' "$entry" >> "$GITHUB_ENV"
+            printf '::add-mask::%s\n' "${entry#*=}"
+            printf '%s\n' "$entry" >> "$GITHUB_ENV"
           done < "$RUNNER_TEMP/identity-ephemeral-keys"
           rm -f "$RUNNER_TEMP/identity-ephemeral-keys"
       - name: Validate protected Gmail secrets without revealing values
