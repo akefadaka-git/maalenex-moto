@@ -32,8 +32,8 @@ jobs:
           while IFS= read -r entry; do
             value="${entry#*=}"
             test -n "$value"
-            printf '::add-mask::%s\\n' "$value"
-            printf '%s\\n' "$entry" >> "$GITHUB_ENV"
+            printf '::add-mask::%s\n' "$value"
+            printf '%s\n' "$entry" >> "$GITHUB_ENV"
           done < "$key_file"
           rm -f "$key_file"
           test ! -e "$key_file"
