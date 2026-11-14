@@ -21,7 +21,7 @@ internal object TrustedNavigationPolicy {
 
         if (!uri.isAbsolute || uri.isOpaque) return false
         if (!uri.scheme.equals("https", ignoreCase = true)) return false
-        if (!uri.host.equals(TRUSTED_HOST, ignoreCase = true)) return false
+        if (!TRUSTED_HOST.equals(uri.host, ignoreCase = true)) return false
         if (uri.rawUserInfo != null) return false
         if (uri.port != -1 && uri.port != 443) return false
 

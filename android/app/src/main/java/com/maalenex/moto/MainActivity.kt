@@ -4,7 +4,9 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
 import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -40,6 +42,17 @@ class MainActivity : Activity() {
             settings.allowContentAccess = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.setSupportZoom(false)
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                    val message = consoleMessage.message()
+                    if (message.contains("Content Security Policy", ignoreCase = true) ||
+                        message.contains("Refused to", ignoreCase = true)
+                    ) {
+                        android.util.Log.e(TAG, "WEBVIEW_CSP_VIOLATION $message")
+                    }
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
@@ -97,6 +110,14 @@ class MainActivity : Activity() {
                     view: WebView,
                     request: WebResourceRequest
                 ) = assetLoader.shouldInterceptRequest(request.url)
+
+                @Suppress("DEPRECATION")
+                override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                    // API 23 cannot identify the requesting frame. Fail closed for all
+                    // user/script navigation; the packaged SPA is loaded programmatically.
+                    android.util.Log.w(TAG, "WEBVIEW_NAVIGATION_BLOCKED stage=legacy_api23")
+                    return true
+                }
 
                 override fun shouldOverrideUrlLoading(
                     view: WebView,

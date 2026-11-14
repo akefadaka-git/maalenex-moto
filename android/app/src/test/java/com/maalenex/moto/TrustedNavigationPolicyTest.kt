@@ -61,5 +61,6 @@ class TrustedNavigationPolicyTest {
             "https://appassets.androidplatform.net/assets/www/index.html#external"
         ))
         assertFalse(TrustedNavigationPolicy.isTrustedDocumentUrl("not a URL"))
+        assertFalse(TrustedNavigationPolicy.isTrustedDocumentUrl("https:///assets/www/index.html"))
     }
 }
