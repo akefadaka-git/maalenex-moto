@@ -197,7 +197,7 @@ export default function App() {
     seatController.current?.abort();
     const controller = new AbortController();
     searchController.current = controller;
-    setSearching(true); setError(""); setSearched(true);
+    setSearching(true); setLoadingSeats(false); setError(""); setSearched(true);
     setSelectedTrip(null); setSeats([]); setSelectedSeatIds([]);
     setHold(null); setChallengeId(""); setBooking(null); setReservation(null);
     try {
