@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type Language = "am" | "en";
 type LocationOption = { id: string; name: string; type: string };
@@ -35,7 +35,7 @@ const copy = {
     from: "መነሻ", to: "መድረሻ", date: "የጉዞ ቀን", count: "ተሳፋሪዎች",
     search: "ጉዞ ፈልግ", loading: "በመፈለግ ላይ…", results: "የተገኙ ጉዞዎች",
     noResults: "ለዚህ ፍለጋ የታተመ ጉዞ አልተገኘም።", choose: "ይምረጡ",
-    seats: "ባዶ ወንበሮች", departure: "መነሻ ሰዓት", fare: "የአንድ ተሳፋሪ ዋጋ",
+    seats: "ባዶ ወንበሮች", departure: "መነሻ ሰዓት", arrival: "የመድረሻ ግምት", availabilityAsOf: "የመረጃ መጨረሻ ዝመና", fare: "የአንድ ተሳፋሪ ዋጋ",
     terminal: "መነሻ ቦታ", selectSeats: "ወንበሮችን ይምረጡ", selected: "የተመረጡ",
     contact: "የቦታ ማስያዣ አድራጊ መረጃ", contactName: "ሙሉ ስም",
     phone: "ስልክ", traveler: "የተሳፋሪ ስም", createHold: "ወንበር ያዝ",
@@ -68,7 +68,7 @@ const copy = {
     from: "From", to: "To", date: "Travel date", count: "Passengers",
     search: "Search trips", loading: "Searching…", results: "Available trips",
     noResults: "No published trips match this search.", choose: "Select",
-    seats: "Available seats", departure: "Departure", fare: "Fare per passenger",
+    seats: "Available seats", departure: "Departure", arrival: "Estimated arrival", availabilityAsOf: "Availability updated", fare: "Fare per passenger",
     terminal: "Boarding point", selectSeats: "Choose seats", selected: "Selected",
     contact: "Booking contact", contactName: "Full name", phone: "Phone",
     traveler: "Passenger name", createHold: "Hold seats",
@@ -135,9 +135,16 @@ export default function App() {
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
   const [working, setWorking] = useState(false);
+  const searchController = useRef<AbortController | null>(null);
+  const seatController = useRef<AbortController | null>(null);
   const t = copy[language];
 
   useEffect(() => { document.documentElement.lang = language; }, [language]);
+
+  useEffect(() => () => {
+    searchController.current?.abort();
+    seatController.current?.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,6 +193,10 @@ export default function App() {
   async function searchTrips(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!originId || !destinationId || originId === destinationId) return;
+    searchController.current?.abort();
+    seatController.current?.abort();
+    const controller = new AbortController();
+    searchController.current = controller;
     setSearching(true); setError(""); setSearched(true);
     setSelectedTrip(null); setSeats([]); setSelectedSeatIds([]);
     setHold(null); setChallengeId(""); setBooking(null); setReservation(null);
@@ -194,23 +205,32 @@ export default function App() {
         origin_id: originId, destination_id: destinationId,
         travel_date: travelDate, passenger_count: String(passengerCount),
       });
-      const response = await fetch(`/api/v1/trips/search?${params.toString()}`);
+      const response = await fetch(`/api/v1/trips/search?${params.toString()}`, { signal: controller.signal });
       if (!response.ok) throw new Error("search");
       setTrips((await response.json()) as TripResult[]);
-    } catch { setTrips([]); setError("error"); }
-    finally { setSearching(false); }
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) { setTrips([]); setError("error"); }
+    } finally {
+      if (!controller.signal.aborted) setSearching(false);
+    }
   }
 
   async function chooseTrip(trip: TripResult) {
+    seatController.current?.abort();
+    const controller = new AbortController();
+    seatController.current = controller;
     setSelectedTrip(trip); setSeats([]); setSelectedSeatIds([]);
     setHold(null); setChallengeId(""); setBooking(null); setReservation(null); setError("");
     setLoadingSeats(true);
     try {
-      const response = await fetch(`/api/v1/trips/${trip.id}/seats`);
+      const response = await fetch(`/api/v1/trips/${trip.id}/seats`, { signal: controller.signal });
       if (!response.ok) throw new Error("seats");
       setSeats((await response.json()) as SeatOption[]);
-    } catch { setError("error"); }
-    finally { setLoadingSeats(false); }
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) setError("error");
+    } finally {
+      if (!controller.signal.aborted) setLoadingSeats(false);
+    }
   }
 
   function toggleSeat(seatId: string) {
@@ -377,8 +397,10 @@ export default function App() {
               <div className="trip-topline"><span className="trip-tag">{t.reservation}</span>
                 <strong>{new Intl.NumberFormat(language === "am" ? "am-ET" : "en-ET", { style: "currency", currency: "ETB" }).format(trip.fare.amount_minor_units / 100)}</strong>
               </div>
-              <p className="trip-time">{new Date(trip.departure_at).toLocaleString(language === "am" ? "am-ET" : "en-ET")}</p>
+              <p className="trip-time">{t.departure}: {new Date(trip.departure_at).toLocaleString(language === "am" ? "am-ET" : "en-ET")}</p>
+              {trip.arrival_estimate_at && <p className="trip-meta">{t.arrival}: {new Date(trip.arrival_estimate_at).toLocaleString(language === "am" ? "am-ET" : "en-ET")}</p>}
               <p className="trip-meta">{t.terminal}: {trip.boarding_model} · {t.seats}: {trip.available_seats}</p>
+              <p className="trip-meta">{t.availabilityAsOf}: {new Date(trip.availability_as_of).toLocaleString(language === "am" ? "am-ET" : "en-ET")}</p>
               <p className="trip-warning">{t.disabled}</p>
               <button className="secondary-button" type="button" onClick={() => chooseTrip(trip)}>{t.selectSeats}</button>
             </article>
