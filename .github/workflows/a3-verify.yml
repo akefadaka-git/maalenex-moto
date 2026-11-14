@@ -3,9 +3,11 @@ name: A3 Passenger MVP Verification
 on:
   push:
     branches:
+      - main
       - feat/a3-passenger-mvp
       - integration/passenger-g1-sync-candidate
       - feat/passenger-ux-resilience
+      - ci/main-branch-verification
 
 permissions:
   contents: read
