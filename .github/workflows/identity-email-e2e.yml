@@ -1,17 +1,18 @@
 name: MaaleNex synthetic verification email E2E (Owner-controlled)
 
 on:
-  # Remote trigger: a narrowly scoped marker commit on main starts one test.
-  # The marker path is deliberately separate from the workflow file so routine
-  # workflow edits cannot accidentally send email.
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/e2e-triggers/identity-email-e2e/**"
-  # Retain the normal GitHub UI/manual option as a fallback.
+  # Email delivery is available only through an explicit manual dispatch.
+  # Routine pushes, including pushes to main, must never send email.
   workflow_dispatch:
     inputs:
+      confirm_send:
+        description: Explicitly authorize one synthetic verification email
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "SEND"
+        default: "NO"
       recipient:
         description: Owner-designated test mailbox (must match the fixed allowlist)
         required: true
@@ -27,6 +28,7 @@ concurrency:
 
 jobs:
   synthetic-email-e2e:
+    if: ${{ inputs.confirm_send == 'SEND' }}
     name: Send one synthetic verification email and verify audit trail
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -62,7 +64,7 @@ jobs:
       IDENTITY_SMTP_STARTTLS: "true"
       IDENTITY_SMTP_USE_SSL: "false"
       IDENTITY_SMTP_TIMEOUT_SECONDS: "15"
-      E2E_RECIPIENT: ${{ github.event_name == 'workflow_dispatch' && inputs.recipient || 'akeayudaka@gmail.com' }}
+      E2E_RECIPIENT: ${{ inputs.recipient }}
       E2E_ALLOWED_RECIPIENT: akeayudaka@gmail.com
       PYTHONUNBUFFERED: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -88,8 +90,8 @@ jobs:
           print("IDENTITY_LOOKUP_KEY=" + secrets.token_urlsafe(48))
           PY
           while IFS= read -r entry; do
-            printf '::add-mask::%s\n' "${entry#*=}"
-            printf '%s\n' "$entry" >> "$GITHUB_ENV"
+            printf '::add-mask::%s\\n' "${entry#*=}"
+            printf '%s\\n' "$entry" >> "$GITHUB_ENV"
           done < "$RUNNER_TEMP/identity-ephemeral-keys"
           rm -f "$RUNNER_TEMP/identity-ephemeral-keys"
       - name: Validate protected Gmail secrets without revealing values
