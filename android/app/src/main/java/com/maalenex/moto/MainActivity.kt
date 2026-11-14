@@ -71,6 +71,7 @@ class MainActivity : Activity() {
                     }
                 }
 
+                @android.annotation.TargetApi(26)
                 override fun onRenderProcessGone(
                     view: WebView,
                     detail: RenderProcessGoneDetail

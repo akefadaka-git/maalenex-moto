@@ -87,6 +87,28 @@ jobs:
         working-directory: android
         run: gradle --no-daemon :app:assembleDebug :app:lintDebug
 
+      - name: Print Android lint diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          REPORT="android/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+          if [ -f "$REPORT" ]; then
+            cat "$REPORT"
+          else
+            echo "Lint text report was not generated at $REPORT"
+          fi
+
+      - name: Upload Android lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maalenex-android-lint-report
+          path: |
+            android/app/build/reports/lint-results-debug.html
+            android/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
