@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/a3-passenger-mvp
+      - integration/passenger-g1-sync-candidate
 
 permissions:
   contents: read
