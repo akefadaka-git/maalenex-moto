@@ -43,11 +43,21 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    if (!TrustedNavigationPolicy.isTrustedDocumentUrl(url)) {
+                        android.util.Log.e(TAG, "WEBVIEW_NAVIGATION_BLOCKED stage=page_started")
+                        view.stopLoading()
+                        return
+                    }
                     android.util.Log.i(TAG, "WEBVIEW_PAGE_STARTED url=$url")
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
                     super.onPageFinished(view, url)
+                    if (!TrustedNavigationPolicy.isTrustedDocumentUrl(url)) {
+                        android.util.Log.e(TAG, "WEBVIEW_NAVIGATION_BLOCKED stage=page_finished")
+                        view.stopLoading()
+                        return
+                    }
                     android.util.Log.i(TAG, "WEBVIEW_PAGE_FINISHED url=$url")
                     if (url != APP_ENTRY_URL) {
                         android.util.Log.w(TAG, "WEBVIEW_JS_PROBE_SKIPPED unexpected_document")
@@ -91,7 +101,19 @@ class MainActivity : Activity() {
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest
-                ): Boolean = request.url.host != APP_ASSET_HOST || !request.url.path.orEmpty().startsWith("/assets/")
+                ): Boolean {
+                    // No frame, external URL, redirect target, or non-packaged path
+                    // may become a top-level document in the app WebView.
+                    if (!request.isForMainFrame) {
+                        android.util.Log.w(TAG, "WEBVIEW_NAVIGATION_BLOCKED stage=subframe")
+                        return true
+                    }
+                    val trusted = TrustedNavigationPolicy.isTrustedDocumentUrl(request.url.toString())
+                    if (!trusted) {
+                        android.util.Log.w(TAG, "WEBVIEW_NAVIGATION_BLOCKED stage=should_override")
+                    }
+                    return !trusted
+                }
             }
         }
         ViewCompat.setOnApplyWindowInsetsListener(webView) { view, windowInsets ->
@@ -173,7 +195,6 @@ class MainActivity : Activity() {
 
     private companion object {
         const val TAG = "MaaleNexWebView"
-        const val APP_ASSET_HOST = "appassets.androidplatform.net"
         const val APP_ENTRY_URL = "https://appassets.androidplatform.net/assets/www/index.html"
     }
 }
