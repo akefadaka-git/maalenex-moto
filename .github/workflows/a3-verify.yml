@@ -5,6 +5,7 @@ on:
     branches:
       - feat/a3-passenger-mvp
       - integration/passenger-g1-sync-candidate
+      - feat/passenger-ux-resilience
 
 permissions:
   contents: read
