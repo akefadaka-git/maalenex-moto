@@ -5,39 +5,43 @@ DEVICE="${ANDROID_SERIAL:-emulator-5554}"
 APK="android/app/build/outputs/apk/debug/app-debug.apk"
 PACKAGE="com.maalenex.moto"
 ACTIVITY="$PACKAGE/.MainActivity"
-LOG_FILE="${TMPDIR:-/tmp}/maalenex-android-logcat.txt"
+ARTIFACT_DIR="artifacts/android-smoke"
+LOG_FILE="$ARTIFACT_DIR/logcat.txt"
+EVIDENCE_FILE="$ARTIFACT_DIR/evidence.txt"
+
+mkdir -p "$ARTIFACT_DIR"
 
 adb_cmd() {
   adb -s "$DEVICE" "$@"
 }
 
+capture_diagnostics() {
+  adb_cmd logcat -b all -d -v brief -t 5000 > "$LOG_FILE" 2>&1 || true
+  tail -n 2000 "$LOG_FILE" > "$ARTIFACT_DIR/logcat-bounded.txt" 2>/dev/null || true
+  {
+    echo "DEVICE=$DEVICE"
+    echo "PACKAGE=$PACKAGE"
+    echo "CAPTURED_AT_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "--- app pid ---"
+    adb_cmd shell pidof "$PACKAGE" 2>&1 || true
+    echo "--- resumed activity ---"
+    adb_cmd shell dumpsys activity activities 2>&1 | grep -E 'mResumedActivity|topResumedActivity|Resumed:' || true
+  } >> "$EVIDENCE_FILE"
+}
+
 diagnose() {
-  echo "::error::Android emulator readiness or smoke test failed"
+  echo "::error::Android emulator readiness or WebView probe verification failed"
   echo "--- adb version ---"
   adb version 2>&1 || true
   echo "--- adb devices -l ---"
   adb devices -l 2>&1 || true
   echo "--- emulator processes ---"
   ps aux 2>&1 | grep -E '[e]mulator|[q]emu' || true
-  echo "--- emulator ports ---"
-  lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E '5554|5555|5037' || true
   echo "--- boot properties ---"
   adb_cmd shell getprop sys.boot_completed 2>&1 || true
-  echo "--- resumed and focused activities ---"
-  adb_cmd shell dumpsys activity activities 2>&1 | grep -E 'mResumedActivity|topResumedActivity|Resumed:' || true
-  echo "--- recent emulator text logs ---"
-  for root in /tmp/android-runner "$HOME/.android/avd"; do
-    if [ -d "$root" ]; then
-      find "$root" -type f \( -name '*.log' -o -name 'emulator*.log' \) -print 2>/dev/null |
-      head -n 20 |
-      while IFS= read -r log; do
-        echo "### $log"
-        tail -n 120 "$log" 2>/dev/null || true
-      done
-    fi
-  done
   echo "--- recent Android logcat ---"
-  adb_cmd logcat -b all -d -t 1600 2>&1 | tail -n 300 || true
+  capture_diagnostics
+  tail -n 300 "$ARTIFACT_DIR/logcat-bounded.txt" 2>/dev/null || true
 }
 
 trap 'status=$?; if [ "$status" -ne 0 ]; then diagnose; fi; exit "$status"' 0
@@ -68,17 +72,23 @@ adb_cmd shell settings put global transition_animation_scale 0
 adb_cmd shell settings put global animator_duration_scale 0
 test -s "$APK"
 adb_cmd install -r "$APK"
+
+# Establish a clean evidence window before launching this exact APK.
+adb_cmd logcat -c
 adb_cmd shell am force-stop "$PACKAGE"
 adb_cmd shell am start -n "$ACTIVITY"
 
 launched=false
 attempt=0
+APP_PID=""
 while [ "$attempt" -lt 60 ]; do
   activity_state="$(adb_cmd shell dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity|Resumed:' || true)"
+  APP_PID="$(adb_cmd shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)"
   if printf '%s\n' "$activity_state" | grep -F "$PACKAGE" | grep -F 'MainActivity' >/dev/null 2>&1 &&
-     adb_cmd shell pidof "$PACKAGE" >/dev/null 2>&1; then
+     [ -n "$APP_PID" ]; then
     launched=true
     echo "Confirmed resumed activity: $activity_state"
+    echo "APP_PID=$APP_PID" | tee -a "$EVIDENCE_FILE"
     break
   fi
   attempt=$((attempt + 1))
@@ -89,15 +99,12 @@ if [ "$launched" != "true" ]; then
   exit 1
 fi
 
-# Verify the packaged frontend actually loaded and executed JavaScript in WebView.
 webview_ready=false
 attempt=0
-while [ "$attempt" -lt 30 ]; do
-  adb_cmd logcat -d -s MaaleNexWebView:I '*:S' > "$LOG_FILE" 2>/dev/null || true
-  if grep -q "WEBVIEW_PAGE_FINISHED" "$LOG_FILE" &&
-     grep -q "WEBVIEW_JS_PROBE" "$LOG_FILE" &&
-     grep -q 'rootPresent.*true' "$LOG_FILE" &&
-     grep -Eq 'rootTextLength.*[1-9][0-9]*' "$LOG_FILE"; then
+while [ "$attempt" -lt 45 ]; do
+  adb_cmd logcat -d -v brief > "$ARTIFACT_DIR/logcat-live.txt" 2>/dev/null || true
+  if grep -F "MaaleNexWebView" "$ARTIFACT_DIR/logcat-live.txt" | grep -F "WEBVIEW_PAGE_FINISHED" >/dev/null 2>&1 &&
+     grep -F "MaaleNexWebView" "$ARTIFACT_DIR/logcat-live.txt" | grep -F "WEBVIEW_JS_PROBE_JSON" >/dev/null 2>&1; then
     webview_ready=true
     break
   fi
@@ -105,18 +112,105 @@ while [ "$attempt" -lt 30 ]; do
   sleep 2
 done
 if [ "$webview_ready" != "true" ]; then
-  echo "WebView page load or JavaScript DOM probe did not complete"
-  adb_cmd logcat -d -s MaaleNexWebView:I '*:S' || true
+  echo "WebView page load or decoded JavaScript probe did not complete"
   exit 1
 fi
-echo "PASS: WebView loaded the packaged frontend and JavaScript observed a rendered DOM root"
+
+capture_diagnostics
+python3 - "$ARTIFACT_DIR/logcat.txt" "$ARTIFACT_DIR/logcat-bounded.txt" "$APP_PID" "$ARTIFACT_DIR/probe.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+full_log = Path(sys.argv[1]).read_text(errors="replace")
+bounded_log = Path(sys.argv[2]).read_text(errors="replace")
+pid = sys.argv[3]
+probe_path = Path(sys.argv[4])
+summary = Path(__import__("os").environ["GITHUB_STEP_SUMMARY"]) if __import__("os").environ.get("GITHUB_STEP_SUMMARY") else None
+
+def fail(message):
+    print(f"FAIL: {message}")
+    if summary:
+        with summary.open("a", encoding="utf-8") as stream:
+            stream.write(f"- **FAIL**: {message}\n")
+    raise SystemExit(1)
+
+# Android logcat brief format includes the emitting process PID.
+pid_marker = re.compile(rf"\(\s*{re.escape(pid)}\)\s*:")
+records = []
+page_finished = False
+for line in full_log.splitlines():
+    if not pid_marker.search(line):
+        continue
+    if "WEBVIEW_PAGE_FINISHED" in line and "https://appassets.androidplatform.net/assets/www/index.html" in line:
+        page_finished = True
+    marker = "WEBVIEW_JS_PROBE_JSON "
+    if marker in line:
+        records.append((line, line.split(marker, 1)[1]))
+
+if not page_finished:
+    fail("expected packaged-document WEBVIEW_PAGE_FINISHED evidence missing for app PID")
+if len(records) != 1:
+    fail(f"expected exactly one decoded probe record for app PID; observed {len(records)}")
+
+original_line, raw_json = records[0]
+try:
+    payload = json.loads(raw_json)
+except Exception as error:
+    fail(f"decoded probe payload is not valid JSON ({type(error).__name__})")
+
+expected = {"schemaVersion", "readyState", "title", "rootPresent", "rootTextLength"}
+if not isinstance(payload, dict) or set(payload) != expected:
+    fail("probe object keys do not exactly match the version-1 schema")
+if type(payload["schemaVersion"]) is not int or payload["schemaVersion"] != 1:
+    fail("schemaVersion must be integer 1")
+if payload["readyState"] != "complete" or type(payload["readyState"]) is not str:
+    fail('readyState must be the string "complete"')
+if type(payload["title"]) is not str:
+    fail("title must be a string")
+if type(payload["rootPresent"]) is not bool or payload["rootPresent"] is not True:
+    fail("rootPresent must be boolean true")
+if type(payload["rootTextLength"]) is not int or payload["rootTextLength"] <= 0:
+    fail("rootTextLength must be a positive integer")
+
+for forbidden, label in (
+    ("WEBVIEW_MAIN_FRAME_ERROR", "main-frame load error"),
+    ("WEBVIEW_RENDERER_GONE", "WebView renderer loss"),
+    ("FATAL EXCEPTION", "fatal Android exception"),
+):
+    if forbidden in full_log:
+        fail(f"{label} detected during smoke window")
+
+# Persist and summarize the exact JSON text emitted by native code, without re-serialization.
+probe_path.write_text(raw_json + "\n", encoding="utf-8")
+print("PASS: WEBVIEW_PAGE_FINISHED for the packaged document")
+print(f"PASS: exactly one decoded probe record from app PID {pid}")
+print(f"WEBVIEW_JS_PROBE_JSON {raw_json}")
+for check in (
+    "schemaVersion == 1",
+    'readyState == "complete"',
+    "rootPresent == true",
+    "rootTextLength is a positive integer",
+    "no main-frame error, renderer loss, or FATAL EXCEPTION",
+):
+    print(f"PASS: {check}")
+if summary:
+    with summary.open("a", encoding="utf-8") as stream:
+        stream.write("## Android WebView runtime probe\n\n")
+        stream.write(f"- App PID: `{pid}`\n")
+        stream.write("- PASS: exactly one decoded probe record from the current app process\n")
+        stream.write(f"- Exact decoded payload: `WEBVIEW_JS_PROBE_JSON {raw_json}`\n")
+        stream.write("- PASS: schemaVersion=1; readyState=complete; rootPresent=true; rootTextLength is a positive integer\n")
+        stream.write("- PASS: no main-frame error, renderer loss, or fatal exception in the smoke window\n")
+PY
+
+CURRENT_PID="$(adb_cmd shell pidof "$PACKAGE" 2>/dev/null | tr -d '\r' || true)"
+if [ "$CURRENT_PID" != "$APP_PID" ]; then
+  echo "FAIL: app process identity changed or process died (before=$APP_PID after=$CURRENT_PID)"
+  exit 1
+fi
+echo "PASS: app process remained alive with PID $APP_PID"
 echo "CAPACITOR_BRIDGE: NOT PRESENT — this app uses Android WebView directly"
 echo "NATIVE_PLUGINS: NOT REGISTERED — no Capacitor plugin runtime/dependencies are configured"
-
-adb_cmd logcat -b all -d -t 4000 > "$LOG_FILE"
-if grep -q "FATAL EXCEPTION" "$LOG_FILE"; then
-  tail -n 400 "$LOG_FILE"
-  echo "Fatal Android exception detected"
-  exit 1
-fi
 echo "PASS: APK installed and $ACTIVITY reached resumed foreground state on $DEVICE"

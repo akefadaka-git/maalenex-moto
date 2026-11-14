@@ -24,6 +24,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Prepare bounded smoke evidence directory
+        run: mkdir -p artifacts/android-smoke
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -103,3 +106,12 @@ jobs:
           disable-linux-hw-accel: false
           disable-animations: false
           script: bash .github/scripts/android-emulator-smoke.sh
+
+      - name: Upload bounded WebView smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maalenex-android-webview-smoke-evidence
+          path: artifacts/android-smoke/
+          if-no-files-found: warn
+          retention-days: 14
